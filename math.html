@@ -1076,7 +1076,7 @@ window.playCountingEnabled = true;
 })();
 
 function fetchItems() {
-  var cdn = 'https://cdn.jsdelivr.net/gh/electricxmaxx/mathassignments@main/math.json';
+  var cdn = 'https://cdn.jsdelivr.net/gh/learningapi/mathassignments@main/math.json';
   return fetch(cdn)
     .then(function(r) { if (!r.ok) throw new Error('CDN error ' + r.status); return r.json(); })
     .catch(function(err) {
@@ -2336,7 +2336,7 @@ function fetchItems() {
     } catch(e) {}
   })();
 
-  var BASE_URL = 'https://cdn.jsdelivr.net/gh/electricxmaxx/mathassignments@main';
+  var BASE_URL = 'https://cdn.jsdelivr.net/gh/learningapi/mathassignments@main';
 
   fetchItems()
     .then(function(items) {

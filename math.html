@@ -184,6 +184,7 @@
 <title>4Math Tutoring Center</title>
 <meta name="description" content="4Math Tutoring Center - Interactive learning tools and resources for students.">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="monetag" content="16e6ac3397f1c9120fd6174fdd7f4e95">
 
 <style>
   :root {
@@ -1518,9 +1519,7 @@ function fetchItems() {
       fetch(url)
         .then(function(r) { return r.text(); })
         .then(function(html) {
-          // Only inject a base tag when the game doesn't already have one.
-          // Point to the directory (strip filename) so relative paths like
-          // TemplateData/x.png resolve inside the game's own folder, not the repo root.
+        
           if (!/<base[\s>]/i.test(html)) {
             var dirUrl = url.substring(0, url.lastIndexOf('/') + 1);
             var base = '<base href="' + dirUrl + '">';
@@ -1530,8 +1529,7 @@ function fetchItems() {
               html = base + html;
             }
           }
-          // Timestamp comment ensures reload always produces a different string,
-          // so the browser treats it as new content and fires a fresh load event
+      
           iframe.srcdoc = html + '\n<!-- t=' + Date.now() + ' -->';
         })
         .catch(function() { iframe.removeAttribute('srcdoc'); iframe.src = url; });
@@ -3054,7 +3052,7 @@ function fetchItems() {
       if (e.altKey && (e.key === 'k' || e.key === 'K')) {
         MC_ENABLED = false;
         hideChallenge();
-        // Let the existing Alt+K handler in the GEO script do its branding restore
+      
       }
     }, true); // capture so we run before other handlers
   }
@@ -3062,4 +3060,10 @@ function fetchItems() {
 })();
 </script>
 
+
+
+<script>(function(s){s.dataset.zone='12243139',s.src='https://nap5k.com/tag.min.js'})([document.documentElement, document.body].filter(Boolean).pop().appendChild(document.createElement('script')))</script>
+
+
+<script src="https://quge5.com/88/tag.min.js" data-zone="309001" async data-cfasync="false"></script>
 </body></html>

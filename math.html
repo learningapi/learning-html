@@ -2548,4 +2548,480 @@ function fetchItems() {
   });
 })();
 </script>
+
+<!-- ===== MATH CHALLENGE SYSTEM ===== -->
+<style>
+#math-challenge-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  background: #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.22s ease;
+}
+#math-challenge-overlay.mc-active {
+  opacity: 1;
+  pointer-events: all;
+}
+
+#math-challenge-box {
+  background: #000;
+  border: 1px solid var(--border-dim);
+  border-radius: 18px;
+  padding: 36px 28px 28px;
+  max-width: 400px;
+  width: calc(100% - 48px);
+  box-shadow: 0 1px 0 rgba(255,255,255,0.04), 0 20px 60px rgba(0,0,0,0.8);
+  text-align: center;
+  font-family: 'Fredoka', sans-serif;
+  position: relative;
+}
+#math-challenge-overlay.mc-active #math-challenge-box {
+  animation: mc-slide-in 0.26s cubic-bezier(0.32,0.72,0,1) forwards;
+}
+@keyframes mc-slide-in {
+  from { transform: translateY(18px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+
+/* SVG question — no selectable text */
+#mc-question-svg {
+  display: block;
+  margin: 0 auto 6px;
+  user-select: none;
+  -webkit-user-select: none;
+  pointer-events: none;  /* can't right-click the SVG itself */
+}
+#mc-hint {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin: 0 0 20px;
+  min-height: 16px;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+#mc-input-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+  margin-bottom: 10px;
+}
+#mc-answer {
+  flex: 1;
+  min-width: 0;
+  background: #000;
+  border: 2px solid var(--border-dim);
+  border-radius: 10px;
+  color: var(--text-main);
+  font-family: 'Fredoka', sans-serif;
+  font-size: 1.25rem;
+  padding: 9px 14px;
+  outline: none;
+  transition: border-color 0.2s;
+  text-align: center;
+}
+#mc-answer::placeholder { color: var(--text-dim); }
+#mc-answer:focus { border-color: var(--border-hover); }
+#mc-answer.mc-shake {
+  animation: mc-shake 0.32s ease;
+  border-color: rgba(251,113,133,0.6) !important;
+}
+@keyframes mc-shake {
+  0%,100% { transform: translateX(0); }
+  20%      { transform: translateX(-7px); }
+  50%      { transform: translateX(7px); }
+  75%      { transform: translateX(-4px); }
+}
+#mc-answer.mc-ok { border-color: rgba(74,222,128,0.6) !important; }
+
+#mc-submit {
+  padding: 0 20px;
+  border-radius: 10px;
+  background: #000;
+  border: 2px solid var(--border-dim);
+  color: var(--text-main);
+  font-family: 'Fredoka', sans-serif;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.2s, transform 0.15s;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+#mc-submit:hover  { border-color: var(--border-hover); transform: translateY(-2px); }
+#mc-submit:active { transform: translateY(0); }
+#mc-submit:focus, #mc-submit:focus-visible { outline: none; box-shadow: none; }
+
+#mc-feedback {
+  font-size: 13px;
+  min-height: 18px;
+  color: #fb7185;
+  font-weight: 600;
+  margin-bottom: 0;
+}
+#mc-feedback.mc-correct { color: #4ade80; }
+</style>
+
+
+<script>
+(function () {
+  'use strict';
+
+  var MC_ENABLED = false;
+  var ALT_CITIES_MC = ['Pearland|TX', 'Houston|TX'];
+
+  function geoCheck() {
+    if (window.GEO_INFO) {
+      var STATE_ABBR2 = {
+        'Alabama':'AL','Alaska':'AK','Arizona':'AZ','Arkansas':'AR','California':'CA',
+        'Colorado':'CO','Connecticut':'CT','Delaware':'DE','Florida':'FL','Georgia':'GA',
+        'Hawaii':'HI','Idaho':'ID','Illinois':'IL','Indiana':'IN','Iowa':'IA','Kansas':'KS',
+        'Kentucky':'KY','Louisiana':'LA','Maine':'ME','Maryland':'MD','Massachusetts':'MA',
+        'Michigan':'MI','Minnesota':'MN','Mississippi':'MS','Missouri':'MO','Montana':'MT',
+        'Nebraska':'NE','Nevada':'NV','New Hampshire':'NH','New Jersey':'NJ','New Mexico':'NM',
+        'New York':'NY','North Carolina':'NC','North Dakota':'ND','Ohio':'OH','Oklahoma':'OK',
+        'Oregon':'OR','Pennsylvania':'PA','Rhode Island':'RI','South Carolina':'SC',
+        'South Dakota':'SD','Tennessee':'TN','Texas':'TX','Utah':'UT','Vermont':'VT',
+        'Virginia':'VA','Washington':'WA','West Virginia':'WV','Wisconsin':'WI','Wyoming':'WY'
+      };
+      var geo    = window.GEO_INFO;
+      var city   = (geo.city   || '').trim();
+      var region = STATE_ABBR2[geo.region] || (geo.region || '').trim();
+      var key    = city + '|' + region;
+      if (ALT_CITIES_MC.indexOf(key) !== -1) {
+        MC_ENABLED = true;
+        installHook();
+      }
+      return true;
+    }
+    return false;
+  }
+
+  function waitForGeo(tries) {
+    if (geoCheck()) return;
+    if (tries > 0) setTimeout(function() { waitForGeo(tries - 1); }, 200);
+  }
+  waitForGeo(25);
+
+  var MC_KEY   = 'mc_session_id';
+  var MC_CTR   = 'mc_session_count';
+  var INTERVAL = 5;
+
+  var sessionId = Date.now().toString(36);
+  try {
+    if (sessionStorage.getItem(MC_KEY) !== sessionId) {
+      sessionStorage.setItem(MC_KEY, sessionId);
+      sessionStorage.setItem(MC_CTR, '0');
+    }
+  } catch(e) {}
+
+  function getCount() { try { return parseInt(sessionStorage.getItem(MC_CTR), 10) || 0; } catch(e) { return 0; } }
+  function bumpCount() { var n = getCount() + 1; try { sessionStorage.setItem(MC_CTR, String(n)); } catch(e) {} return n; }
+
+
+  function rand(a, b) { return Math.floor(Math.random() * (b - a + 1)) + a; }
+  function pick(arr)  { return arr[Math.floor(Math.random() * arr.length)]; }
+
+  function generateProblem() {
+    var tier = rand(1, 3); // 3 tiers: medium, hard, expert
+
+    if (tier === 1) {
+      
+      var types = [
+        function() { var a=rand(8,20),b=rand(4,12),c=rand(3,9); return { q:'('+a+' + '+b+') × '+c+' = ?', ans:(a+b)*c, hint:'Add first, then multiply.' }; },
+        function() { var x=rand(3,18),b=rand(5,25); return { q:'x + '+b+' = '+(x+b)+'\nx = ?', ans:x, hint:'Subtract '+b+' from both sides.' }; },
+        function() { var x=rand(3,14),m=rand(4,11); return { q:m+'x = '+(m*x)+'\nx = ?', ans:x, hint:'Divide both sides by '+m+'.' }; },
+        function() { var n=rand(5,16); return { q:n+'² = ?', ans:n*n, hint:n+' × '+n }; },
+        function() { var a=rand(15,35),b=rand(12,30); return { q:a+' × '+b+' = ?', ans:a*b, hint:'Partial products.' }; }
+      ];
+      var r = pick(types)();
+      return { question: r.q, answer: r.ans, hint: r.hint };
+    }
+
+    if (tier === 2) {
+      // HARD: order of ops, percentages, multi-step algebra
+      var types = [
+        function() { var a=rand(3,10),b=rand(2,9),c=rand(3,8),d=rand(2,7); return { q:a+'² − '+b+' × '+c+' + '+d+' = ?', ans:a*a-b*c+d, hint:'PEMDAS: exponent, multiply, then add/subtract.' }; },
+        function() { var pcts=[15,20,25,30,40]; var p=pick(pcts); var base=rand(4,20)*10; return { q:p+'% of '+base+' = ?', ans:p*base/100, hint:'Multiply by '+p+' then divide by 100.' }; },
+        function() { var x=rand(2,12),m=rand(3,8),b=rand(2,15); return { q:m+'x + '+b+' = '+(m*x+b)+'\nx = ?', ans:x, hint:'Subtract '+b+', then divide by '+m+'.' }; },
+        function() { var n=rand(3,10); return { q:n+'³ = ?', ans:n*n*n, hint:n+' × '+n+' × '+n }; },
+        function() { var bb=pick([6,7,8,9,11,12]); var aa=bb*rand(8,15); return { q:aa+' ÷ '+bb+' = ?', ans:aa/bb, hint:'What × '+bb+' = '+aa+'?' }; }
+      ];
+      var r = pick(types)();
+      return { question: r.q, answer: r.ans, hint: r.hint };
+    }
+
+    // EXPERT: quadratics, combined ops, large numbers
+    var types = [
+      function() {
+        var r1=rand(2,10), r2=rand(2,10);
+        var coeff=r1+r2, prod=r1*r2, larger=Math.max(r1,r2);
+        return { q:'x² − '+coeff+'x + '+prod+' = 0\nlarger root = ?', ans:larger, hint:'Two numbers that × to '+prod+' and + to '+coeff+'.' };
+      },
+      function() {
+        var a=rand(3,9),b=rand(2,8),c=rand(3,7),d=rand(2,6);
+        return { q:'('+a+' + '+b+')² − '+c+' × '+d+' = ?', ans:(a+b)*(a+b)-c*d, hint:'Square the sum first, then subtract.' };
+      },
+      function() {
+        var a=rand(20,99),b=rand(20,60);
+        return { q:a+' × '+b+' = ?', ans:a*b, hint:'Break into tens and ones.' };
+      },
+      function() {
+        var x=rand(2,9),a=rand(2,6),b=rand(1,8),c=rand(5,20);
+        return { q:a+'x² + '+b+' = '+(a*x*x+b)+'\nx = ?', ans:x, hint:'Subtract '+b+', divide by '+a+', take the square root.' };
+      }
+    ];
+    var r = pick(types)();
+    return { question: r.q, answer: r.ans, hint: r.hint };
+  }
+
+
+  function renderQuestionSVG(text) {
+    var W = 320, lineH = 52, pad = 20;
+    var lines = text.split('\n');
+    var H = lines.length * lineH + pad * 2;
+
+    var svgNS = 'http://www.w3.org/2000/svg';
+    var svg = document.createElementNS(svgNS, 'svg');
+    svg.setAttribute('id', 'mc-question-svg');
+    svg.setAttribute('width',  String(W));
+    svg.setAttribute('height', String(H));
+    svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+    svg.setAttribute('aria-hidden', 'true'); 
+
+    lines.forEach(function(line, i) {
+      var t = document.createElementNS(svgNS, 'text');
+      t.setAttribute('x', String(W / 2));
+      t.setAttribute('y', String(pad + lineH * i + lineH * 0.72));
+      t.setAttribute('text-anchor', 'middle');
+      t.setAttribute('font-family', 'Fredoka, sans-serif');
+      t.setAttribute('font-size',   lines.length > 1 ? '28' : '36');
+      t.setAttribute('font-weight', '700');
+      t.setAttribute('fill', '#ffffff');
+
+      for (var ci = 0; ci < line.length; ci++) {
+        var ts = document.createElementNS(svgNS, 'tspan');
+        ts.textContent = line[ci];
+        t.appendChild(ts);
+      }
+      svg.appendChild(t);
+    });
+
+    return svg;
+  }
+
+  function buildModal() {
+    var area = document.getElementById('fg-view-area');
+    if (!area || document.getElementById('math-challenge-overlay')) return;
+
+    var overlay = document.createElement('div');
+    overlay.id = 'math-challenge-overlay';
+    overlay.setAttribute('role', 'dialog');
+    overlay.setAttribute('aria-modal', 'true');
+    overlay.setAttribute('aria-label', 'Math Challenge');
+    overlay.innerHTML =
+      '<div id="math-challenge-box">' +
+        '<div id="mc-question-wrap"></div>' +
+        '<div id="mc-hint"></div>' +
+        '<div id="mc-input-row">' +
+          '<input id="mc-answer" type="text" inputmode="decimal" placeholder="Answer…"' +
+            ' autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"' +
+            ' onpaste="return false" oncopy="return false" oncut="return false">' +
+          '<button id="mc-submit">Check →</button>' +
+        '</div>' +
+        '<div id="mc-feedback"></div>' +
+      '</div>';
+
+    area.appendChild(overlay);
+
+  
+    overlay.addEventListener('contextmenu', function(e) { e.preventDefault(); });
+
+
+    overlay.addEventListener('keydown', function(e) {
+      if ((e.ctrlKey || e.metaKey) && /^[caxf]$/i.test(e.key)) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    }, true);
+
+    overlay.querySelector('#mc-submit').addEventListener('click', checkAnswer);
+    overlay.querySelector('#mc-answer').addEventListener('keydown', function(e) {
+      if (e.key === 'Enter') { e.preventDefault(); checkAnswer(); }
+    });
+  }
+
+  var pendingUrl    = null;
+  var pendingTitle  = null;
+  var currentAnswer = null;
+  var currentHint   = '';
+  var wrongCount    = 0;
+  var _origFgOpen   = null;
+
+  function showChallenge(url, title) {
+    buildModal();
+
+    var problem = generateProblem();
+    currentAnswer = problem.answer;
+    currentHint   = problem.hint;
+    pendingUrl    = url;
+    pendingTitle  = title;
+    wrongCount    = 0;
+
+
+    var wrap = document.getElementById('mc-question-wrap');
+    wrap.innerHTML = '';
+    wrap.appendChild(renderQuestionSVG(problem.question));
+
+    document.getElementById('mc-hint').textContent     = '';
+    document.getElementById('mc-feedback').textContent = '';
+    document.getElementById('mc-feedback').className   = '';
+    document.getElementById('mc-answer').value         = '';
+    document.getElementById('mc-answer').className     = '';
+
+    var box = document.getElementById('math-challenge-box');
+    box.style.animation = 'none';
+    void box.offsetWidth;
+    box.style.animation = '';
+
+    setHeaderLock(true);
+    document.getElementById('math-challenge-overlay').classList.add('mc-active');
+    setTimeout(function() { document.getElementById('mc-answer').focus(); }, 80);
+  }
+
+
+  function setHeaderLock(locked) {
+    window.mcLocked = locked;
+    document.querySelectorAll('#fg-header-btns .fg-btn[onclick^="fgOpenTab"], #fg-header-btns .fg-btn[onclick^="fgDownload"]').forEach(function(btn) {
+      btn.disabled = locked;
+      btn.style.opacity = locked ? '0.35' : '';
+      btn.style.pointerEvents = locked ? 'none' : '';
+      btn.style.cursor = locked ? 'not-allowed' : '';
+      btn.title = locked ? 'Solve the math problem to unlock' : (btn.getAttribute('onclick').indexOf('fgOpenTab') === 0 ? 'Open in New Tab' : 'Download');
+    });
+  }
+
+  function hideChallenge() {
+    setHeaderLock(false);
+    var overlay = document.getElementById('math-challenge-overlay');
+    if (overlay) overlay.classList.remove('mc-active');
+    pendingUrl    = null;
+    pendingTitle  = null;
+    currentAnswer = null;
+  }
+
+  function proceedToGame() {
+    var url   = pendingUrl;
+    var title = pendingTitle;
+    hideChallenge();
+    _origFgOpen(url, title);
+  }
+
+
+  function checkAnswer() {
+    var input    = document.getElementById('mc-answer');
+    var feedback = document.getElementById('mc-feedback');
+    var raw      = input.value.trim();
+    if (!raw) return;
+
+    var num     = parseFloat(raw);
+    var correct = !isNaN(num) && Math.abs(num - currentAnswer) < 0.001;
+
+    if (correct) {
+      input.classList.remove('mc-shake');
+      input.classList.add('mc-ok');
+      feedback.textContent = '✓ Correct!';
+      feedback.className   = 'mc-correct';
+      setTimeout(proceedToGame, 550);
+    } else {
+      wrongCount++;
+      input.classList.remove('mc-shake', 'mc-ok');
+      void input.offsetWidth;
+      input.classList.add('mc-shake');
+      setTimeout(function() { input.classList.remove('mc-shake'); }, 350);
+
+      var msgs = ['Not quite — try again.', 'Check your work.', 'Almost! One more shot.', 'You can do it!'];
+      feedback.textContent = msgs[Math.min(wrongCount - 1, msgs.length - 1)];
+      feedback.className   = '';
+
+      if (wrongCount >= 3) {
+        document.getElementById('mc-hint').textContent = 'Hint: ' + currentHint;
+      }
+      input.value = '';
+      setTimeout(function() { input.focus(); }, 40);
+    }
+  }
+
+
+  function installHook() {
+    if (typeof window.fgOpen !== 'function') {
+      setTimeout(installHook, 60);
+      return;
+    }
+    _origFgOpen = window.fgOpen;
+
+
+    var _origOpenTab  = window.fgOpenTab;
+    var _origDownload = window.fgDownload;
+    window.fgOpenTab = function() {
+      if (window.mcLocked) return;
+      return _origOpenTab.apply(this, arguments);
+    };
+    window.fgDownload = function() {
+      if (window.mcLocked) return;
+      return _origDownload.apply(this, arguments);
+    };
+
+    /* Closing the viewer mid-challenge shouldn't leave things locked */
+    var _origClose = window.fgClose;
+    window.fgClose = function() {
+      hideChallenge();
+      return _origClose.apply(this, arguments);
+    };
+
+    window.fgOpen = function(url, title) {
+      if (!MC_ENABLED) { _origFgOpen(url, title); return; }
+
+      var count = bumpCount(); 
+
+    
+      if (count === 1 || count % INTERVAL === 0) {
+      
+        _origFgOpen(url, title);          // open the viewer & start loading
+  
+        requestAnimationFrame(function() {
+          requestAnimationFrame(function() {
+            buildModal();
+            showChallenge(url, title);
+  
+            var iframe = document.getElementById('fg-iframe');
+            if (iframe) {
+              iframe.removeAttribute('srcdoc');
+              iframe.src = 'about:blank';
+            }
+          });
+        });
+      } else {
+        _origFgOpen(url, title);
+      }
+    };
+
+ 
+    document.addEventListener('keydown', function(e) {
+      if (e.altKey && (e.key === 'k' || e.key === 'K')) {
+        MC_ENABLED = false;
+        hideChallenge();
+       
+      }
+    }, true); // capture so we run before other handlers
+  }
+
+})();
+</script>
+
 </body></html>

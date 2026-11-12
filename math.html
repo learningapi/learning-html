@@ -2876,7 +2876,10 @@ function fetchItems() {
   var currentAnswer = null;
   var currentHint   = '';
   var wrongCount    = 0;
-  var _origFgOpen   = null;
+  /* No "= null" here on purpose: installHook() can run synchronously (when the
+     geo lookup has already finished) before execution reaches this line, and an
+     initializer would wipe the original fgOpen it just saved. */
+  var _origFgOpen;
 
   function showChallenge(url, title) {
     buildModal();
@@ -2980,6 +2983,7 @@ function fetchItems() {
       setTimeout(installHook, 60);
       return;
     }
+    if (window.fgOpen.__mcWrapped) return; // never wrap twice
     _origFgOpen = window.fgOpen;
 
     /* Guard new-tab and download so they can't bypass the challenge
@@ -3037,12 +3041,13 @@ function fetchItems() {
       }
 
       if (needs) {
-        setPending(true);
         openGated(url, title);
+        setPending(true); // set once the challenge is actually on screen
       } else {
         _origFgOpen(url, title);
       }
     };
+    window.fgOpen.__mcWrapped = true;
 
     /* Alt+K override: restore DEFAULT branding AND disable MC for this session */
     document.addEventListener('keydown', function(e) {

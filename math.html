@@ -1,4 +1,4 @@
-<html lang="en"><head>
+<!DOCTYPE html><html lang="en"><head>
 <script>
 
 (function() {
@@ -267,6 +267,7 @@
     will-change: transform;
     contain: layout style;
     position: relative;
+    z-index: 2;
     overflow: hidden;
     display: flex;
     flex-direction: column;
@@ -1078,7 +1079,7 @@ window.playCountingEnabled = true;
 
 function fetchItems() {
   var cdn = 'https://cdn.jsdelivr.net/gh/learningapi/mathassignments@main/math.json';
-  return fetch(cdn)
+  return fetch(cdn, { cache: 'no-store' })
     .then(function(r) { if (!r.ok) throw new Error('CDN error ' + r.status); return r.json(); })
     .catch(function(err) {
       document.getElementById('preload-status').innerHTML += 'CDN unavailable: ' + err.message + '<br>';
@@ -1220,6 +1221,21 @@ function fetchItems() {
             <input type="range" id="vanta-zoom" min="1" max="30" step="1" value="9">
             <span class="vanta-val" id="vanta-zoom-val">0.9</span>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="settings-section">
+      <div class="settings-row">
+        <div class="settings-row-title">christmas theme</div>
+        <div class="settings-row-desc">red and green animated fog with fast, drifting snow flurries in the background.</div>
+        <div class="vanta-toggle-row">
+          <div id="christmas-toggle" onclick="christmasToggle()" role="switch" aria-checked="false" tabindex="0"
+            style="width:60px;height:32px;border-radius:99px;background:var(--card-bg);border:2px solid var(--border-dim);position:relative;cursor:pointer;flex-shrink:0;transition:background 0.35s,border-color 0.35s,box-shadow 0.35s;outline:none;">
+            <div id="christmas-thumb"
+              style="position:absolute;top:50%;left:3px;width:22px;height:22px;border-radius:50%;background:#64748b;box-shadow:0 1px 4px rgba(0,0,0,0.5);transform:translateY(-50%);transition:transform 0.35s,background 0.35s,box-shadow 0.35s;"></div>
+          </div>
+          <span id="christmas-toggle-label" style="font-size:14px;font-weight:600;color:var(--text-dim);min-width:24px;">off</span>
         </div>
       </div>
     </div>
@@ -1373,7 +1389,7 @@ function fetchItems() {
       badge.textContent = count.toLocaleString() + (count === 1 ? ' play' : ' plays');
       badge.classList.add('has-count');
     } else {
-      badge.textContent = 'nobody played ts yet 🥀';
+      badge.textContent = 'nobody played ts yet 🎮';
       badge.classList.remove('has-count');
     }
   }
@@ -1513,14 +1529,22 @@ function fetchItems() {
     if (isOpen) consoleLine('console loaded 2');
   };
 
+
   function loadIntoIframe(url) {
     var iframe = document.getElementById('fg-iframe');
-    if (/jsdelivr\.net|gitdelivr\.in|cloudinary\.com|ngrok/i.test(url)) {
+    var jsonBase = window.BASE_URL || 'https://cdn.jsdelivr.net/gh/learningapi/mathassignments@main';
+
+    var needsFetch = url.indexOf(jsonBase) === 0 || /ngrok/i.test(url);
+    // gitdelivr / cloudinary still fetched for CORS but no base tag injected
+    var fetchOnly  = /gitdelivr\.in|cloudinary\.com/i.test(url);
+
+    if (needsFetch || fetchOnly) {
       fetch(url)
         .then(function(r) { return r.text(); })
         .then(function(html) {
-        
-          if (!/<base[\s>]/i.test(html)) {
+          // Only inject <base> for JSON CDN games (and ngrok); leave external
+          // game HTML completely untouched.
+          if (needsFetch && !/<base[\s>]/i.test(html)) {
             var dirUrl = url.substring(0, url.lastIndexOf('/') + 1);
             var base = '<base href="' + dirUrl + '">';
             if (/<head[\s>]/i.test(html)) {
@@ -1529,7 +1553,6 @@ function fetchItems() {
               html = base + html;
             }
           }
-      
           iframe.srcdoc = html + '\n<!-- t=' + Date.now() + ' -->';
         })
         .catch(function() { iframe.removeAttribute('srcdoc'); iframe.src = url; });
@@ -1982,6 +2005,11 @@ function fetchItems() {
 (function () {
   var SETTINGS_KEY = '4g_settings';
   var fogEnabled  = false;
+  var christmasEnabled = false;
+  var snowCanvas = null;
+  var snowFrame = 0;
+  var snowCtx = null;
+  var snowflakes = [];
   var storedBlur  = 2;
   var storedSpeed = 12;
   var storedZoom  = 9;
@@ -2024,7 +2052,13 @@ function fetchItems() {
   function applyColors() {
     if (!fogEl) return;
     var hue = getHue();
-    var cols = [
+    var cols = christmasEnabled ? [
+      'rgba(190,24,45,0.58)',
+      'rgba(18,112,58,0.52)',
+      'rgba(145,18,38,0.48)',
+      'rgba(12,82,46,0.50)',
+      'rgba(220,42,54,0.42)'
+    ] : [
       'hsl(' + hue              + ',60%,28%)',
       'hsl(' + (hue + 20) % 360 + ',45%,18%)',
       'hsl(' + hue              + ',55%,22%)',
@@ -2058,6 +2092,84 @@ function fetchItems() {
     fogEl.style.transformOrigin = '50% 50%';
   }
 
+  function stopSnow() {
+    if (snowFrame) cancelAnimationFrame(snowFrame);
+    snowFrame = 0;
+    if (snowCanvas) {
+      if (snowCanvas._resizeHandler) window.removeEventListener('resize', snowCanvas._resizeHandler);
+      snowCanvas.remove();
+      snowCanvas = null;
+      snowCtx = null;
+      snowflakes = [];
+    }
+  }
+
+  function startSnow() {
+    if (snowCanvas) return;
+    snowCanvas = document.createElement('canvas');
+    snowCanvas.id = 'christmas-snow';
+    snowCanvas.setAttribute('aria-hidden', 'true');
+    snowCanvas.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:1;';
+    document.body.appendChild(snowCanvas);
+    snowCtx = snowCanvas.getContext('2d');
+    var width = 0, height = 0;
+    function resize() {
+      var dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+      width = window.innerWidth;
+      height = window.innerHeight;
+      snowCanvas.width = Math.round(width * dpr);
+      snowCanvas.height = Math.round(height * dpr);
+      snowCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      var count = Math.min(150, Math.max(65, Math.round(width / 9)));
+      snowflakes = [];
+      for (var i = 0; i < count; i++) snowflakes.push(makeFlake(true));
+    }
+    function makeFlake(randomY) {
+      return {
+        // Distribute flakes across the entire width, not just the right edge.
+        x: Math.random() * width,
+        y: randomY ? Math.random() * height : -8 - Math.random() * 24,
+        r: 1 + Math.random() * 2.5,
+        vy: (2.0 + Math.random() * 2.8) * 0.5,
+        // Each flake gets its own diagonal direction and drifting sway.
+        vx: (-1.9 + Math.random() * 3.8) * 0.5,
+        sway: Math.random() * Math.PI * 2,
+        swaySpeed: (0.012 + Math.random() * 0.025) * 0.5,
+        swayAmount: 0.25 + Math.random() * 0.7,
+        alpha: 0.38 + Math.random() * 0.55
+      };
+    }
+    function draw() {
+      if (!snowCanvas || !snowCtx) return;
+      snowCtx.clearRect(0, 0, width, height);
+      snowflakes.forEach(function(f) {
+        f.sway += f.swaySpeed;
+        f.x += f.vx + Math.sin(f.sway) * f.swayAmount;
+        f.y += f.vy;
+      
+        if (f.x < -12) f.x = width + 12;
+        else if (f.x > width + 12) f.x = -12;
+        if (f.y > height + 8) {
+          var next = makeFlake(false);
+          f.x = Math.random() * width;
+          f.y = next.y; f.r = next.r; f.vy = next.vy;
+          f.vx = next.vx; f.sway = next.sway;
+          f.swaySpeed = next.swaySpeed; f.swayAmount = next.swayAmount;
+          f.alpha = next.alpha;
+        }
+        snowCtx.beginPath();
+        snowCtx.arc(f.x, f.y, f.r, 0, Math.PI * 2);
+        snowCtx.fillStyle = 'rgba(255,255,255,' + f.alpha + ')';
+        snowCtx.fill();
+      });
+      snowFrame = requestAnimationFrame(draw);
+    }
+    resize();
+    window.addEventListener('resize', resize);
+    snowCanvas._resizeHandler = resize;
+    draw();
+  }
+
   function fogStart() {
     var el = ensureFogEl();
     applyColors();
@@ -2087,7 +2199,7 @@ function fetchItems() {
 
   window.vantaToggle = function () {
     fogEnabled = !fogEnabled;
-    if (fogEnabled) fogStart(); else fogStop();
+    if (fogEnabled || christmasEnabled) fogStart(); else fogStop();
     setUI(fogEnabled);
     persist();
     var t = document.getElementById('vanta-toggle');
@@ -2101,10 +2213,44 @@ function fetchItems() {
 
   window.vantaUpdateColors = function () { applyColors(); };
 
+  function setChristmasUI(on) {
+    var toggle = document.getElementById('christmas-toggle');
+    var thumb = document.getElementById('christmas-thumb');
+    var label = document.getElementById('christmas-toggle-label');
+    if (!toggle || !thumb || !label) return;
+    toggle.setAttribute('aria-checked', String(on));
+    toggle.style.background = on ? 'hsl(' + getHue() + ',65%,32%)' : '';
+    toggle.style.borderColor = on ? 'hsl(' + getHue() + ',65%,52%)' : '';
+    toggle.style.boxShadow = on ? '0 0 14px hsl(' + getHue() + ',80%,45%,0.45)' : '';
+    thumb.style.transform = on ? 'translateY(-50%) translateX(28px)' : 'translateY(-50%)';
+    thumb.style.background = on ? '#fff' : '#64748b';
+    label.textContent = on ? 'on' : 'off';
+    label.style.color = on ? 'hsl(' + getHue() + ',75%,65%)' : '';
+  }
+
+  window.christmasToggle = function() {
+    christmasEnabled = !christmasEnabled;
+    if (christmasEnabled) {
+      fogStart();
+      startSnow();
+    } else {
+      stopSnow();
+      if (fogEnabled) {
+        fogStart();
+      } else {
+        fogStop();
+      }
+    }
+    applyColors();
+    setChristmasUI(christmasEnabled);
+    persist();
+  };
+
   function persist() {
     try {
       var s = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
       s.vantaFog   = fogEnabled;
+      s.christmasTheme = christmasEnabled;
       s.vantaBlur  = storedBlur;
       s.vantaSpeed = storedSpeed;
       s.vantaZoom  = storedZoom;
@@ -2132,6 +2278,7 @@ function fetchItems() {
     if (saved.vantaBlur  !== undefined) storedBlur  = saved.vantaBlur;
     if (saved.vantaSpeed !== undefined) storedSpeed = saved.vantaSpeed;
     if (saved.vantaZoom  !== undefined) storedZoom  = saved.vantaZoom;
+    if (saved.christmasTheme) christmasEnabled = true;
     if (saved.vantaFog) {
       fogEnabled = true;
       window.addEventListener('load', function () { fogStart(); setUI(true); });
@@ -2147,6 +2294,11 @@ function fetchItems() {
       function(){ return storedZoom; },  function(v){ storedZoom  = v; }, 10, applyZoom);
 
     setUI(fogEnabled);
+    setChristmasUI(christmasEnabled);
+    if (christmasEnabled) {
+      fogStart();
+      startSnow();
+    }
   });
 
 })();
@@ -2263,8 +2415,8 @@ function fetchItems() {
 
   window.fgResortGrid = sortCards;
 
-
-  window.sortByPlaysEnabled = false;
+ 
+  window.sortByPlaysEnabled = true;
 
   window.sortPlaysToggle = function() {
     var SETTINGS_KEY = '4g_settings';
@@ -2288,10 +2440,8 @@ function fetchItems() {
 
     if (on) {
       if (window.playCountsFullyLoaded) {
-        // already have all counts, just resort
         sortCards();
       } else if (window.bulkFetchPlayCounts) {
-        // fetch all counts then resort
         window.bulkFetchPlayCounts(sortCards);
       } else {
         sortCards();
@@ -2307,12 +2457,16 @@ function fetchItems() {
     } catch(e) {}
   };
 
+  // Restore saved preference.  Default is ON; only opt-out if explicitly saved false.
   (function() {
     try {
       var s = JSON.parse(localStorage.getItem('4g_settings') || '{}');
-      if (s.sortByPlays) {
+      if (s.sortByPlays === false) {
+        // User explicitly turned it off — honour that
+        window.sortByPlaysEnabled = false;
+      } else {
+        // Default ON (includes first visit where s.sortByPlays is undefined)
         window.sortByPlaysEnabled = true;
-       
         document.addEventListener('DOMContentLoaded', function() {
           var toggle = document.getElementById('sort-plays-toggle');
           var thumb  = document.getElementById('sort-plays-thumb');
@@ -2328,20 +2482,37 @@ function fetchItems() {
           label.textContent        = 'on';
           label.style.color        = 'hsl(' + hue + ',70%,65%)';
         });
-        
         window._pendingSortByPlaysRestore = true;
       }
-    } catch(e) {}
+    } catch(e) {
+      // Parse error — default to on
+      window.sortByPlaysEnabled = true;
+      window._pendingSortByPlaysRestore = true;
+    }
   })();
 
-  var BASE_URL = 'https://cdn.jsdelivr.net/gh/learningapi/mathassignments@main';
+  // ── JSON CDN base URL (exposed globally for loadIntoIframe) ──────────────
+  var BASE_URL = window.BASE_URL = 'https://cdn.jsdelivr.net/gh/learningapi/mathassignments@main';
 
   fetchItems()
     .then(function(items) {
       var favs = window.fgFavUtils ? window.fgFavUtils.getFavs() : [];
 
       items.forEach(function(item) {
-        var url = /^https?:\/\//i.test(item.url) ? item.url : BASE_URL + '/' + item.url;
+        // Resolve item URL: absolute → use as-is; protocol-relative → add https:;
+        // leading slash or bare relative path → prepend BASE_URL.
+        // This keeps external game URLs untouched so loadIntoIframe won't
+        // inject a base tag that could break their assets.
+        var url;
+        if (/^https?:\/\//i.test(item.url)) {
+          url = item.url;
+        } else if (/^\/\//i.test(item.url)) {
+          url = 'https:' + item.url;
+        } else {
+          // Strip any accidental leading slashes before joining
+          url = BASE_URL + '/' + item.url.replace(/^\/+/, '');
+        }
+
         var a = document.createElement('a');
         a.href = url;
         a.className = 'card';
@@ -2350,7 +2521,14 @@ function fetchItems() {
  
         function cardThumb(item) {
           if (item.image) {
-            var imgUrl = /^https?:\/\//i.test(item.image) ? item.image : BASE_URL + '/' + item.image;
+            var imgUrl;
+            if (/^https?:\/\//i.test(item.image)) {
+              imgUrl = item.image;
+            } else if (/^\/\//i.test(item.image)) {
+              imgUrl = 'https:' + item.image;
+            } else {
+              imgUrl = BASE_URL + '/' + item.image.replace(/^\/+/, '');
+            }
             return '<img class="card-img" src="' + imgUrl + '" alt="' + item.title + '" loading="lazy">';
           }
         
@@ -2665,7 +2843,7 @@ function fetchItems() {
 #mc-feedback.mc-correct { color: #4ade80; }
 </style>
 
-<!-- Math Challenge — rendered inside #fg-view-area so it only shows in-game -->
+
 <script>
 (function () {
   'use strict';
@@ -2721,8 +2899,7 @@ function fetchItems() {
   function getCount() { try { return parseInt(sessionStorage.getItem(MC_CTR), 10) || 0; } catch(e) { return 0; } }
   function bumpCount() { var n = getCount() + 1; try { sessionStorage.setItem(MC_CTR, String(n)); } catch(e) {} return n; }
 
-  /* An issued-but-unsolved challenge survives closing the viewer, opening a
-     different game, and page reloads. Only a correct answer clears it. */
+
   var MC_PENDING = 'mc_pending';
   var _pendingMem = false; // fallback if sessionStorage is unavailable
   function isPending() {
@@ -2733,7 +2910,6 @@ function fetchItems() {
     try { if (on) sessionStorage.setItem(MC_PENDING, '1'); else sessionStorage.removeItem(MC_PENDING); } catch(e) {}
   }
 
-  /* ── problem bank (medium-hard and up only) ───── */
   function rand(a, b) { return Math.floor(Math.random() * (b - a + 1)) + a; }
   function pick(arr)  { return arr[Math.floor(Math.random() * arr.length)]; }
 
@@ -2754,7 +2930,7 @@ function fetchItems() {
     }
 
     if (tier === 2) {
-      // HARD: order of ops, percentages, multi-step algebra
+
       var types = [
         function() { var a=rand(3,10),b=rand(2,9),c=rand(3,8),d=rand(2,7); return { q:a+'² − '+b+' × '+c+' + '+d+' = ?', ans:a*a-b*c+d, hint:'PEMDAS: exponent, multiply, then add/subtract.' }; },
         function() { var pcts=[15,20,25,30,40]; var p=pick(pcts); var base=rand(4,20)*10; return { q:p+'% of '+base+' = ?', ans:p*base/100, hint:'Multiply by '+p+' then divide by 100.' }; },
@@ -2766,7 +2942,7 @@ function fetchItems() {
       return { question: r.q, answer: r.ans, hint: r.hint };
     }
 
-    // EXPERT: quadratics, combined ops, large numbers
+
     var types = [
       function() {
         var r1=rand(2,10), r2=rand(2,10);
@@ -2790,9 +2966,7 @@ function fetchItems() {
     return { question: r.q, answer: r.ans, hint: r.hint };
   }
 
-  /* ── SVG question renderer ───────────────────────
-     Draws the question as vector graphics — no DOM text,
-     nothing to select, copy, or right-click-search.       */
+
   function renderQuestionSVG(text) {
     var W = 320, lineH = 52, pad = 20;
     var lines = text.split('\n');
@@ -2815,8 +2989,7 @@ function fetchItems() {
       t.setAttribute('font-size',   lines.length > 1 ? '28' : '36');
       t.setAttribute('font-weight', '700');
       t.setAttribute('fill', '#ffffff');
-      // Scatter each glyph via individual <tspan> so it can't be trivially OCR'd
-      // by naive tools — also prevents browser text-search from hitting it
+   
       for (var ci = 0; ci < line.length; ci++) {
         var ts = document.createElementNS(svgNS, 'tspan');
         ts.textContent = line[ci];
@@ -2852,10 +3025,10 @@ function fetchItems() {
 
     area.appendChild(overlay);
 
-    /* Block right-click on the whole overlay so they can't inspect-element the SVG */
+ 
     overlay.addEventListener('contextmenu', function(e) { e.preventDefault(); });
 
-    /* Block Ctrl/Cmd+C, Ctrl/Cmd+A, Ctrl/Cmd+F on the overlay */
+
     overlay.addEventListener('keydown', function(e) {
       if ((e.ctrlKey || e.metaKey) && /^[caxf]$/i.test(e.key)) {
         e.preventDefault();
@@ -2874,9 +3047,7 @@ function fetchItems() {
   var currentAnswer = null;
   var currentHint   = '';
   var wrongCount    = 0;
-  /* No "= null" here on purpose: installHook() can run synchronously (when the
-     geo lookup has already finished) before execution reaches this line, and an
-     initializer would wipe the original fgOpen it just saved. */
+
   var _origFgOpen;
 
   function showChallenge(url, title) {
@@ -2910,7 +3081,7 @@ function fetchItems() {
     setTimeout(function() { document.getElementById('mc-answer').focus(); }, 80);
   }
 
-  /* Lock/unlock the "open in new tab" and "download" header buttons */
+
   function setHeaderLock(locked) {
     window.mcLocked = locked;
     document.querySelectorAll('#fg-header-btns .fg-btn[onclick^="fgOpenTab"], #fg-header-btns .fg-btn[onclick^="fgDownload"]').forEach(function(btn) {
@@ -2935,11 +3106,11 @@ function fetchItems() {
     var url   = pendingUrl;
     var title = pendingTitle;
     hideChallenge();
-    if (!url) return; // viewer was closed in the moment after solving
+    if (!url) return; 
     _origFgOpen(url, title);
   }
 
-  /* ── answer logic ─────────────────────────────── */
+ 
   function checkAnswer() {
     var input    = document.getElementById('mc-answer');
     var feedback = document.getElementById('mc-feedback');
@@ -2975,7 +3146,7 @@ function fetchItems() {
     }
   }
 
-  /* ── hook fgOpen ──────────────────────────────── */
+
   function installHook() {
     if (typeof window.fgOpen !== 'function') {
       setTimeout(installHook, 60);
@@ -2984,8 +3155,7 @@ function fetchItems() {
     if (window.fgOpen.__mcWrapped) return; // never wrap twice
     _origFgOpen = window.fgOpen;
 
-    /* Guard new-tab and download so they can't bypass the challenge
-       (also covers calling them from the console while locked) */
+  
     var _origOpenTab  = window.fgOpenTab;
     var _origDownload = window.fgDownload;
     window.fgOpenTab = function() {
@@ -2997,23 +3167,20 @@ function fetchItems() {
       return _origDownload.apply(this, arguments);
     };
 
-    /* Reload would otherwise re-fetch the game under the overlay */
+
     var _origReload = window.fgReload;
     window.fgReload = function() {
       if (window.mcLocked) return;
       return _origReload.apply(this, arguments);
     };
 
-    /* Closing the viewer hides the overlay and unlocks the header, but does
-       NOT clear the pending challenge: the next open asks again. */
+
     var _origClose = window.fgClose;
     window.fgClose = function() {
       hideChallenge();
       return _origClose.apply(this, arguments);
     };
 
-    /* Open the viewer on a blank page (no game fetched, no play counted) and
-       put the challenge over it. The real game only loads in proceedToGame. */
     function openGated(url, title) {
       var realTrack = window.trackPlay;
       window.trackPlay = function() {};
@@ -3031,30 +3198,30 @@ function fetchItems() {
     window.fgOpen = function(url, title) {
       if (!MC_ENABLED) { _origFgOpen(url, title); return; }
 
-      // An unsolved challenge always comes first; it doesn't use up a count.
+   
       var needs = isPending();
       if (!needs) {
-        var count = bumpCount(); // first game is count=1, then every INTERVAL
+        var count = bumpCount(); 
         needs = (count === 1 || count % INTERVAL === 0);
       }
 
       if (needs) {
         openGated(url, title);
-        setPending(true); // set once the challenge is actually on screen
+        setPending(true); 
       } else {
         _origFgOpen(url, title);
       }
     };
     window.fgOpen.__mcWrapped = true;
 
-    /* Alt+K override: restore DEFAULT branding AND disable MC for this session */
+   
     document.addEventListener('keydown', function(e) {
       if (e.altKey && (e.key === 'k' || e.key === 'K')) {
         MC_ENABLED = false;
         hideChallenge();
       
       }
-    }, true); // capture so we run before other handlers
+    }, true); 
   }
 
 })();

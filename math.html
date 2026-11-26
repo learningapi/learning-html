@@ -1101,6 +1101,10 @@ function fetchItems() {
       <img src="https://ik.imagekit.io/rckdebdbt/links.png" alt="Links">
     </a>
 
+    <button class="nav-icon-btn" id="partners-open-btn" onclick="partnersOpen()" title="Partners">
+      <img src="https://ik.imagekit.io/rckdebdbt/partners.png" alt="Partners">
+    </button>
+
     <button class="nav-icon-btn" id="settings-open-btn" onclick="settingsOpen()" title="Settings">
       <img src="https://ik.imagekit.io/rckdebdbt/newtab%20(4).png" alt="Settings">
     </button>
@@ -1352,6 +1356,100 @@ function fetchItems() {
   <iframe id="chat-iframe" src="about:blank" style="flex:1;border:none;display:block;" allowfullscreen
     sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"></iframe>
 </div>
+
+<div id="partners-panel" aria-hidden="true" style="position:fixed;inset:0;z-index:10001;display:flex;flex-direction:column;background:#000;transform:translateY(100%);transition:transform 0.28s cubic-bezier(0.32,0.72,0,1);pointer-events:none;">
+  <div style="display:flex;align-items:center;justify-content:space-between;padding:0 20px;height:56px;background:#000;border-bottom:1px solid #1a1a1a;flex-shrink:0;gap:12px;">
+    <span style="font-family:'Fredoka',sans-serif;font-size:18px;font-weight:600;color:#fff;">Partners</span>
+    <button class="fg-btn" onclick="partnersClose()" title="Close">
+      <img src="https://ik.imagekit.io/rckdebdbt/newtab%20(2).png" alt="Close" onerror="this.style.display='none';this.parentNode.textContent='✕';this.parentNode.style.fontSize='18px';this.parentNode.style.color='#94a3b8';">
+    </button>
+  </div>
+  <div style="flex:1;overflow-y:auto;">
+    <div class="item-grid" id="partners-grid"></div>
+  </div>
+</div>
+
+<script>
+(function () {
+  // Partner list lives in its own GitHub repo, served through jsDelivr.
+  // Change PARTNERS_BASE if the repo name/owner differs.
+  var PARTNERS_BASE = 'https://cdn.jsdelivr.net/gh/4gamescontacting-alt/partners@main';
+  var PARTNERS_URL  = PARTNERS_BASE + '/partners.json';
+  var loaded = false;
+
+  function resolve(u) {
+    if (/^https?:\/\//i.test(u)) return u;
+    if (/^\/\//.test(u)) return 'https:' + u;
+    return PARTNERS_BASE + '/' + String(u).replace(/^\/+/, '');
+  }
+
+  function esc(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  function thumb(p) {
+    if (p.image) {
+      return '<img class="card-img" src="' + esc(resolve(p.image)) + '" alt="' + esc(p.title) + '" loading="lazy">';
+    }
+    var hash = 0;
+    for (var i = 0; i < p.title.length; i++) hash = ((hash << 5) - hash) + p.title.charCodeAt(i);
+    hash = Math.abs(hash);
+    var h1 = hash % 360, h2 = (h1 + 40) % 360;
+    var initials = p.title.replace(/[^A-Za-z0-9 ]/g, '').split(' ')
+      .filter(function (w) { return w.length > 0; }).slice(0, 2)
+      .map(function (w) { return w[0].toUpperCase(); }).join('') || p.title.slice(0, 2).toUpperCase();
+    return '<div class="card-img-placeholder" style="background:linear-gradient(135deg, hsl(' + h1 + ',55%,28%), hsl(' + h2 + ',60%,20%));">' + esc(initials) + '</div>';
+  }
+
+  function render(list) {
+    var grid = document.getElementById('partners-grid');
+    grid.innerHTML = '';
+    list.forEach(function (p) {
+      if (!p || !p.title || !p.url) return;
+      var a = document.createElement('a');
+      a.href = p.url;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      a.className = 'card';
+      a.innerHTML =
+        thumb(p) +
+        '<div class="card-title-bar item-label"><span class="card-title-text">' + esc(p.title) + '</span></div>';
+      grid.appendChild(a);
+    });
+  }
+
+  function load() {
+    if (loaded) return;
+    fetch(PARTNERS_URL, { cache: 'no-store' })
+      .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .then(function (list) { loaded = true; render(Array.isArray(list) ? list : []); })
+      .catch(function (err) { console.warn('[partners] load failed:', err); });
+  }
+
+  window.partnersOpen = function () {
+    var panel = document.getElementById('partners-panel');
+    load();
+    panel.style.pointerEvents = 'all';
+    panel.style.transform = 'translateY(0)';
+    panel.setAttribute('aria-hidden', 'false');
+    document.body.style.overflow = 'hidden';
+  };
+
+  window.partnersClose = function () {
+    var panel = document.getElementById('partners-panel');
+    panel.style.pointerEvents = 'none';
+    panel.style.transform = 'translateY(100%)';
+    panel.setAttribute('aria-hidden', 'true');
+    document.body.style.overflow = '';
+  };
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && document.getElementById('partners-panel').getAttribute('aria-hidden') === 'false') {
+      partnersClose();
+    }
+  });
+})();
+</script>
 
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
